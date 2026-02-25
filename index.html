@@ -1,0 +1,1201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#1c1c1e">
+  <title>HDR Image Cropper</title>
+  <style>
+    /* ─── Reset ─────────────────────────────────────────────── */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background: #1c1c1e;
+      color: #f2f2f7;
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ─── Screens ────────────────────────────────────────────── */
+    .screen {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .hidden { display: none !important; }
+
+    /* ─── Upload Screen ──────────────────────────────────────── */
+    #uploadScreen {
+      background: #1c1c1e;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      padding-top: max(24px, env(safe-area-inset-top));
+    }
+
+    .upload-card {
+      width: 100%;
+      max-width: 480px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .app-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .app-title h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .hdr-pill {
+      background: linear-gradient(135deg, #ff9f0a, #ff6b35);
+      color: #000;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 6px;
+      letter-spacing: 0.8px;
+    }
+
+    .upload-zone {
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      border: 2px dashed #3a3a3c;
+      border-radius: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .upload-zone:active,
+    .upload-zone.dragover {
+      border-color: #0a84ff;
+      background: rgba(10, 132, 255, 0.08);
+    }
+
+    .upload-icon { opacity: 0.35; }
+
+    .upload-zone h2 {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f2f2f7;
+    }
+
+    .upload-zone p {
+      font-size: 14px;
+      color: rgba(242, 242, 247, 0.5);
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .upload-cta {
+      margin-top: 6px;
+      background: #0a84ff;
+      color: #fff;
+      border: none;
+      padding: 13px 36px;
+      border-radius: 14px;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .upload-cta:active { opacity: 0.7; }
+
+    /* ─── Crop Screen ────────────────────────────────────────── */
+    #cropScreen { background: #1c1c1e; }
+
+    /* Header */
+    .crop-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 10px 14px;
+      padding-top: max(10px, env(safe-area-inset-top));
+      background: #2c2c2e;
+      border-bottom: 1px solid #3a3a3c;
+      gap: 8px;
+      min-height: 50px;
+    }
+
+    .file-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .file-name {
+      font-size: 13px;
+      font-weight: 500;
+      color: rgba(242, 242, 247, 0.65);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #hdrBadge {
+      flex-shrink: 0;
+      background: linear-gradient(135deg, #ff9f0a, #ff6b35);
+      color: #000;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 5px;
+      letter-spacing: 0.8px;
+      display: none;
+      align-items: center;
+    }
+    #hdrBadge.visible { display: inline-flex; }
+
+    /* Workspace */
+    .workspace {
+      flex: 1;
+      min-height: 0;
+      position: relative;
+      overflow: hidden;
+      background: #141414;
+    }
+
+    #cropCanvas {
+      position: absolute;
+      inset: 0;
+      touch-action: none;
+      cursor: default;
+      display: block;
+    }
+
+    /* Dimension overlay */
+    #dimOverlay {
+      position: absolute;
+      bottom: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.65);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 10px;
+      pointer-events: none;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    #dimOverlay.visible { opacity: 1; }
+
+    /* Outside-image hint */
+    #outsideHint {
+      position: absolute;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255, 159, 10, 0.9);
+      color: #000;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 12px;
+      border-radius: 10px;
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    #outsideHint.visible { opacity: 1; }
+
+    /* Toolbar */
+    .crop-toolbar {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      padding-bottom: max(10px, env(safe-area-inset-bottom));
+      background: #2c2c2e;
+      border-top: 1px solid #3a3a3c;
+      gap: 8px;
+    }
+
+    .tb-btn {
+      background: #3a3a3c;
+      color: #f2f2f7;
+      border: none;
+      padding: 9px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s, opacity 0.15s;
+      line-height: 1;
+    }
+    .tb-btn:active { background: #4a4a4c; }
+
+    .aspect-select {
+      background: #3a3a3c;
+      color: #f2f2f7;
+      border: none;
+      padding: 9px 10px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      min-width: 68px;
+      text-align: center;
+    }
+
+    .spacer { flex: 1; }
+
+    .save-btn {
+      background: #0a84ff;
+      color: #fff;
+      border: none;
+      padding: 11px 22px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .save-btn:active { opacity: 0.7; }
+    .save-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    /* ─── Toast ──────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 90px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: rgba(44, 44, 46, 0.95);
+      color: #f2f2f7;
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 999;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      white-space: nowrap;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+    /* ─── Loading spinner ────────────────────────────────────── */
+    #loadingOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(28, 28, 30, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+    #loadingOverlay.hidden { display: none; }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid rgba(255,255,255,0.15);
+      border-top-color: #0a84ff;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════ UPLOAD SCREEN ══════════════════════ -->
+<div id="uploadScreen" class="screen">
+  <div class="upload-card">
+    <div class="app-title">
+      <h1>Image Cropper</h1>
+      <span class="hdr-pill">HDR</span>
+    </div>
+
+    <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Upload image">
+      <svg class="upload-icon" width="60" height="60" viewBox="0 0 60 60" fill="none" aria-hidden="true">
+        <rect x="4" y="34" width="52" height="20" rx="6" stroke="white" stroke-width="3"/>
+        <path d="M30 6 L30 32" stroke="white" stroke-width="3" stroke-linecap="round"/>
+        <path d="M18 18 L30 6 L42 18" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="44" cy="44" r="4" fill="white"/>
+      </svg>
+      <h2>Upload an Image</h2>
+      <p>JPEG · PNG · HEIC · WebP · AVIF<br>HDR &amp; wide-gamut images supported</p>
+      <button class="upload-cta" type="button">Choose Photo</button>
+    </div>
+
+    <input type="file" id="fileInput" accept="image/*" style="display:none" aria-hidden="true">
+  </div>
+</div>
+
+<!-- ══════════════════ CROP SCREEN ════════════════════════ -->
+<div id="cropScreen" class="screen hidden">
+
+  <header class="crop-header">
+    <button class="tb-btn" id="newBtn" type="button" aria-label="Upload new image">← New</button>
+    <div class="file-info">
+      <span class="file-name" id="fileNameLabel"></span>
+      <span id="hdrBadge" aria-label="HDR image">HDR</span>
+    </div>
+    <button class="tb-btn" id="fitBtn" type="button">Fit</button>
+  </header>
+
+  <div class="workspace" id="workspace">
+    <canvas id="cropCanvas" aria-label="Image crop editor"></canvas>
+    <div id="dimOverlay" aria-live="polite"></div>
+    <div id="outsideHint">⬜ White fill outside image</div>
+  </div>
+
+  <div class="crop-toolbar">
+    <button class="tb-btn" id="resetBtn" type="button">Reset</button>
+    <select class="aspect-select" id="aspectSelect" aria-label="Aspect ratio">
+      <option value="free">Free</option>
+      <option value="1:1">1∶1</option>
+      <option value="4:3">4∶3</option>
+      <option value="3:2">3∶2</option>
+      <option value="16:9">16∶9</option>
+      <option value="9:16">9∶16</option>
+      <option value="2:3">2∶3</option>
+      <option value="3:4">3∶4</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="save-btn" id="saveBtn" type="button">Save Image</button>
+  </div>
+
+</div>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay" class="hidden"><div class="spinner"></div></div>
+
+<!-- Toast -->
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+
+/* ═══════════════════════════════════════════════════════════════
+   CONSTANTS
+═══════════════════════════════════════════════════════════════ */
+const MIN_CROP_PX = 10;    // minimum crop dimension in image pixels
+const HANDLE_DRAW_R = 8;   // handle visual radius (CSS px, scaled up for mobile)
+const HANDLE_HIT_R  = 16;  // handle hit radius (CSS px)
+const HANDLE_DRAW_R_MOBILE = 12;
+const HANDLE_HIT_R_MOBILE  = 22;
+
+const ASPECT_MAP = {
+  'free': null,
+  '1:1':  1,
+  '4:3':  4/3,
+  '3:2':  3/2,
+  '16:9': 16/9,
+  '9:16': 9/16,
+  '2:3':  2/3,
+  '3:4':  3/4,
+};
+
+const HANDLE_CURSORS = {
+  nw: 'nw-resize', n: 'n-resize', ne: 'ne-resize',
+  e:  'e-resize',  se: 'se-resize',
+  s:  's-resize',  sw: 'sw-resize', w: 'w-resize',
+  move: 'grab', pan: 'grab',
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════════════════ */
+let imgBitmap    = null;   // full-res ImageBitmap (for export)
+let prevBitmap   = null;   // preview bitmap (downscaled, for display)
+let imgNatW      = 0;
+let imgNatH      = 0;
+let origFileName = 'image';
+let isHDRFile    = false;
+let isP3Canvas   = false;
+
+// View transform: image-pixel ↔ canvas-CSS-pixel
+// canvasCSS_x = imgPx_x * view.zoom + view.panX
+const view = { zoom: 1, panX: 0, panY: 0 };
+
+// Crop in image-pixel space (may extend outside image bounds)
+const crop = { x: 0, y: 0, w: 0, h: 0 };
+
+// Locked aspect ratio (null = free)
+let lockedAspect = null;
+
+// Drag state
+let drag = null;
+// {
+//   handle: string ('nw'|'n'|'ne'|'e'|'se'|'s'|'sw'|'w'|'move'|'pan'),
+//   startCrop: { x,y,w,h },
+//   startPanX: number, startPanY: number,
+//   startImgX: number, startImgY: number,
+//   startCssX: number, startCssY: number,
+// }
+
+// Pinch zoom
+const activePointers = new Map(); // pointerId → { x, y }
+let prevPinchDist = null;
+let prevPinchMidX = null;
+let prevPinchMidY = null;
+
+// rAF
+let rafPending = false;
+
+/* ═══════════════════════════════════════════════════════════════
+   DOM REFS
+═══════════════════════════════════════════════════════════════ */
+const uploadScreen  = document.getElementById('uploadScreen');
+const cropScreen    = document.getElementById('cropScreen');
+const fileInput     = document.getElementById('fileInput');
+const uploadZone    = document.getElementById('uploadZone');
+const canvas        = document.getElementById('cropCanvas');
+const workspace     = document.getElementById('workspace');
+const fileNameLabel = document.getElementById('fileNameLabel');
+const hdrBadge      = document.getElementById('hdrBadge');
+const dimOverlay    = document.getElementById('dimOverlay');
+const outsideHint   = document.getElementById('outsideHint');
+const fitBtn        = document.getElementById('fitBtn');
+const resetBtn      = document.getElementById('resetBtn');
+const newBtn        = document.getElementById('newBtn');
+const saveBtn       = document.getElementById('saveBtn');
+const aspectSelect  = document.getElementById('aspectSelect');
+const toast         = document.getElementById('toast');
+const loadingOvl    = document.getElementById('loadingOverlay');
+
+/* ═══════════════════════════════════════════════════════════════
+   CANVAS CONTEXT — prefer display-p3 for HDR/wide-gamut
+═══════════════════════════════════════════════════════════════ */
+let ctx;
+try {
+  ctx = canvas.getContext('2d', { colorSpace: 'display-p3' });
+  const attrs = ctx.getContextAttributes?.();
+  isP3Canvas = attrs?.colorSpace === 'display-p3';
+} catch (_) {}
+if (!ctx) {
+  ctx = canvas.getContext('2d');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CANVAS SIZING
+═══════════════════════════════════════════════════════════════ */
+function resizeCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const w = workspace.clientWidth;
+  const h = workspace.clientHeight;
+  if (!w || !h) return;
+  canvas.width  = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width  = w + 'px';
+  canvas.style.height = h + 'px';
+}
+
+const ro = new ResizeObserver(() => {
+  if (!imgBitmap) return;
+  resizeCanvas();
+  fitView();
+  requestRender();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   COORDINATE TRANSFORMS
+═══════════════════════════════════════════════════════════════ */
+function cssW() { return canvas.clientWidth  || canvas.width  / (window.devicePixelRatio || 1); }
+function cssH() { return canvas.clientHeight || canvas.height / (window.devicePixelRatio || 1); }
+
+// Image-pixel → canvas CSS-pixel
+function toCSS(ix, iy) {
+  return { x: ix * view.zoom + view.panX, y: iy * view.zoom + view.panY };
+}
+
+// Canvas CSS-pixel → image-pixel
+function toImg(cx, cy) {
+  return { x: (cx - view.panX) / view.zoom, y: (cy - view.panY) / view.zoom };
+}
+
+function getCanvasPos(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: e.clientX - r.left, y: e.clientY - r.top };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   VIEW MANAGEMENT
+═══════════════════════════════════════════════════════════════ */
+function fitView() {
+  const cw = cssW(), ch = cssH();
+  if (!cw || !ch || !imgNatW) return;
+
+  // Compute bounding box: image union crop
+  const bx0 = Math.min(0, crop.x);
+  const by0 = Math.min(0, crop.y);
+  const bx1 = Math.max(imgNatW, crop.x + crop.w);
+  const by1 = Math.max(imgNatH, crop.y + crop.h);
+  const bw = bx1 - bx0;
+  const bh = by1 - by0;
+
+  const pad = Math.min(cw, ch) * 0.07 + 24;
+  const s = Math.min((cw - pad * 2) / bw, (ch - pad * 2) / bh);
+  view.zoom = s;
+  view.panX = (cw - bw * s) / 2 - bx0 * s;
+  view.panY = (ch - bh * s) / 2 - by0 * s;
+}
+
+function zoomAround(cx, cy, factor) {
+  view.panX = cx + (view.panX - cx) * factor;
+  view.panY = cy + (view.panY - cy) * factor;
+  view.zoom *= factor;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HANDLE DEFINITIONS
+═══════════════════════════════════════════════════════════════ */
+// Returns { id → { ix, iy } } in image-pixel space
+function getHandlePoints() {
+  const { x, y, w, h } = crop;
+  return {
+    nw: { ix: x,       iy: y       },
+    n:  { ix: x + w/2, iy: y       },
+    ne: { ix: x + w,   iy: y       },
+    e:  { ix: x + w,   iy: y + h/2 },
+    se: { ix: x + w,   iy: y + h   },
+    s:  { ix: x + w/2, iy: y + h   },
+    sw: { ix: x,       iy: y + h   },
+    w:  { ix: x,       iy: y + h/2 },
+  };
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HIT TESTING
+═══════════════════════════════════════════════════════════════ */
+function isMobile() { return window.innerWidth < 768 || 'ontouchstart' in window; }
+
+function hitTest(cx, cy) {
+  const hr = isMobile() ? HANDLE_HIT_R_MOBILE : HANDLE_HIT_R;
+  for (const [id, { ix, iy }] of Object.entries(getHandlePoints())) {
+    const p = toCSS(ix, iy);
+    if (Math.hypot(cx - p.x, cy - p.y) <= hr) return id;
+  }
+  // Inside crop rect → move
+  const cp = toCSS(crop.x, crop.y);
+  const cpW = crop.w * view.zoom;
+  const cpH = crop.h * view.zoom;
+  if (cx >= cp.x && cx <= cp.x + cpW && cy >= cp.y && cy <= cp.y + cpH) {
+    return 'move';
+  }
+  return null; // returns null → pan view
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RENDER
+═══════════════════════════════════════════════════════════════ */
+function requestRender() {
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    render();
+  });
+}
+
+function render() {
+  if (!imgBitmap) return;
+
+  const dpr = window.devicePixelRatio || 1;
+  const cw  = cssW();
+  const ch  = cssH();
+
+  ctx.save();
+  ctx.scale(dpr, dpr);
+
+  // ── 1. Background
+  ctx.fillStyle = '#141414';
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Crop rect in canvas CSS coords
+  const cp  = toCSS(crop.x, crop.y);
+  const cpW = crop.w * view.zoom;
+  const cpH = crop.h * view.zoom;
+
+  // ── 2. White fill for crop area (visible where crop extends outside image)
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(cp.x, cp.y, cpW, cpH);
+
+  // ── 3. Draw image
+  const ip  = toCSS(0, 0);
+  const ipW = imgNatW * view.zoom;
+  const ipH = imgNatH * view.zoom;
+  ctx.drawImage(prevBitmap || imgBitmap, ip.x, ip.y, ipW, ipH);
+
+  // ── 4. Dark overlay outside crop (4 rectangles)
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.58)';
+  ctx.fillRect(0, 0, cw, cp.y);                               // top
+  ctx.fillRect(0, cp.y + cpH, cw, ch - cp.y - cpH);          // bottom
+  ctx.fillRect(0, cp.y, cp.x, cpH);                          // left
+  ctx.fillRect(cp.x + cpW, cp.y, cw - cp.x - cpW, cpH);     // right
+
+  // ── 5. Rule-of-thirds grid inside crop
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)';
+  ctx.lineWidth = 0.75;
+  for (let i = 1; i <= 2; i++) {
+    const gx = cp.x + cpW * i / 3;
+    const gy = cp.y + cpH * i / 3;
+    ctx.beginPath(); ctx.moveTo(gx, cp.y); ctx.lineTo(gx, cp.y + cpH); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cp.x, gy); ctx.lineTo(cp.x + cpW, gy); ctx.stroke();
+  }
+
+  // ── 6. Crop border
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([]);
+  ctx.strokeRect(cp.x + 0.75, cp.y + 0.75, cpW - 1.5, cpH - 1.5);
+
+  // ── 7. Image boundary dashed line (if crop extends outside image)
+  const cropOutside = crop.x < -0.5 || crop.y < -0.5
+    || (crop.x + crop.w) > imgNatW + 0.5 || (crop.y + crop.h) > imgNatH + 0.5;
+  if (cropOutside) {
+    ctx.strokeStyle = 'rgba(255, 159, 10, 0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 5]);
+    ctx.strokeRect(ip.x + 0.75, ip.y + 0.75, ipW - 1.5, ipH - 1.5);
+    ctx.setLineDash([]);
+  }
+
+  // ── 8. Handles
+  const hr = isMobile() ? HANDLE_DRAW_R_MOBILE : HANDLE_DRAW_R;
+  for (const { ix, iy } of Object.values(getHandlePoints())) {
+    const p = toCSS(ix, iy);
+    // drop shadow
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, hr + 1.5, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fill();
+    // white circle
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, hr, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  // ── Update overlays
+  const outW = Math.round(crop.w);
+  const outH = Math.round(crop.h);
+  dimOverlay.textContent = `${outW} × ${outH} px`;
+  dimOverlay.classList.add('visible');
+
+  if (cropOutside) {
+    outsideHint.classList.add('visible');
+  } else {
+    outsideHint.classList.remove('visible');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DRAG LOGIC
+═══════════════════════════════════════════════════════════════ */
+function startDrag(handle, canvasCssX, canvasCssY) {
+  const imgPt = toImg(canvasCssX, canvasCssY);
+  drag = {
+    handle,
+    startCrop:  { ...crop },
+    startPanX:  view.panX,
+    startPanY:  view.panY,
+    startImgX:  imgPt.x,
+    startImgY:  imgPt.y,
+    startCssX:  canvasCssX,
+    startCssY:  canvasCssY,
+  };
+}
+
+function applyDrag(canvasCssX, canvasCssY) {
+  if (!drag) return;
+
+  const ip = toImg(canvasCssX, canvasCssY);
+  const dx = ip.x - drag.startImgX;
+  const dy = ip.y - drag.startImgY;
+  const sc = drag.startCrop;
+
+  if (drag.handle === 'pan') {
+    view.panX = drag.startPanX + (canvasCssX - drag.startCssX);
+    view.panY = drag.startPanY + (canvasCssY - drag.startCssY);
+    return;
+  }
+
+  if (drag.handle === 'move') {
+    crop.x = sc.x + dx;
+    crop.y = sc.y + dy;
+    return;
+  }
+
+  // Resize handles
+  // Fixed edges (opposite corner/edge from the dragged handle)
+  const right  = sc.x + sc.w;
+  const bottom = sc.y + sc.h;
+
+  let nx = sc.x, ny = sc.y, nw = sc.w, nh = sc.h;
+
+  switch (drag.handle) {
+    case 'nw':
+      nx = sc.x + dx; ny = sc.y + dy;
+      nw = right - nx; nh = bottom - ny;
+      if (lockedAspect) { nh = nw / lockedAspect; ny = bottom - nh; }
+      break;
+    case 'n':
+      ny = sc.y + dy; nh = bottom - ny;
+      if (lockedAspect) { nw = nh * lockedAspect; nx = sc.x + (sc.w - nw) / 2; }
+      break;
+    case 'ne':
+      ny = sc.y + dy; nw = sc.w + dx; nh = bottom - ny;
+      if (lockedAspect) { nh = nw / lockedAspect; ny = bottom - nh; }
+      break;
+    case 'e':
+      nw = sc.w + dx;
+      if (lockedAspect) { nh = nw / lockedAspect; ny = sc.y + (sc.h - nh) / 2; }
+      break;
+    case 'se':
+      nw = sc.w + dx; nh = sc.h + dy;
+      if (lockedAspect) { nh = nw / lockedAspect; }
+      break;
+    case 's':
+      nh = sc.h + dy;
+      if (lockedAspect) { nw = nh * lockedAspect; nx = sc.x + (sc.w - nw) / 2; }
+      break;
+    case 'sw':
+      nx = sc.x + dx; nw = right - nx; nh = sc.h + dy;
+      if (lockedAspect) { nh = nw / lockedAspect; }
+      break;
+    case 'w':
+      nx = sc.x + dx; nw = right - nx;
+      if (lockedAspect) { nh = nw / lockedAspect; ny = sc.y + (sc.h - nh) / 2; }
+      break;
+  }
+
+  // Enforce minimum size
+  if (nw < MIN_CROP_PX) {
+    if (['nw','w','sw'].includes(drag.handle)) nx = right - MIN_CROP_PX;
+    nw = MIN_CROP_PX;
+    if (lockedAspect) { nh = nw / lockedAspect; }
+  }
+  if (nh < MIN_CROP_PX) {
+    if (['nw','n','ne'].includes(drag.handle)) ny = bottom - MIN_CROP_PX;
+    nh = MIN_CROP_PX;
+    if (lockedAspect) { nw = nh * lockedAspect; }
+  }
+
+  crop.x = nx; crop.y = ny;
+  crop.w = nw; crop.h = nh;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   POINTER EVENTS
+═══════════════════════════════════════════════════════════════ */
+canvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  canvas.setPointerCapture(e.pointerId);
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (activePointers.size === 1) {
+    prevPinchDist = null;
+    const pos = getCanvasPos(e);
+    const hit = hitTest(pos.x, pos.y);
+    const handle = hit ?? 'pan';
+    startDrag(handle, pos.x, pos.y);
+    canvas.style.cursor = (handle === 'move' || handle === 'pan') ? 'grabbing' : (HANDLE_CURSORS[handle] ?? 'default');
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  e.preventDefault();
+  if (!activePointers.has(e.pointerId)) return;
+
+  activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (activePointers.size >= 2) {
+    // Pinch zoom — cancel single-touch drag
+    drag = null;
+    doPinch();
+    requestRender();
+    return;
+  }
+
+  const pos = getCanvasPos(e);
+  if (drag) {
+    applyDrag(pos.x, pos.y);
+    requestRender();
+  } else {
+    // Update hover cursor on desktop
+    if (!isMobile()) {
+      const hit = hitTest(pos.x, pos.y);
+      canvas.style.cursor = hit ? (HANDLE_CURSORS[hit] ?? 'default') : 'default';
+    }
+  }
+});
+
+canvas.addEventListener('pointerup', e => {
+  activePointers.delete(e.pointerId);
+  prevPinchDist = null;
+  if (activePointers.size === 0) {
+    drag = null;
+    canvas.style.cursor = 'default';
+  }
+});
+
+canvas.addEventListener('pointercancel', e => {
+  activePointers.delete(e.pointerId);
+  prevPinchDist = null;
+  if (activePointers.size === 0) drag = null;
+  requestRender();
+});
+
+/* ═══════════════════════════════════════════════════════════════
+   PINCH ZOOM
+═══════════════════════════════════════════════════════════════ */
+function doPinch() {
+  const pts = [...activePointers.values()];
+  if (pts.length < 2) return;
+  const [a, b] = pts;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y);
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  const r = canvas.getBoundingClientRect();
+  const cx = mx - r.left;
+  const cy = my - r.top;
+
+  if (prevPinchDist !== null) {
+    const factor = dist / prevPinchDist;
+    zoomAround(cx, cy, factor);
+    view.panX += cx - prevPinchMidX;
+    view.panY += cy - prevPinchMidY;
+  }
+  prevPinchDist = dist;
+  prevPinchMidX = cx;
+  prevPinchMidY = cy;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MOUSE WHEEL ZOOM
+═══════════════════════════════════════════════════════════════ */
+canvas.addEventListener('wheel', e => {
+  e.preventDefault();
+  const pos = getCanvasPos(e);
+  const factor = e.deltaY < 0 ? 1.12 : (1 / 1.12);
+  zoomAround(pos.x, pos.y, factor);
+  requestRender();
+}, { passive: false });
+
+/* ═══════════════════════════════════════════════════════════════
+   IMAGE LOADING
+═══════════════════════════════════════════════════════════════ */
+async function tryCreateBitmap(file) {
+  // Try preserving original color space (critical for HDR/P3)
+  try {
+    return await createImageBitmap(file, { colorSpaceConversion: 'none' });
+  } catch (_) {}
+
+  // Fallback via <img> element (needed for HEIC on some browsers)
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = () => rej(new Error('decode failed'));
+      img.src = url;
+    });
+    const bmp = await createImageBitmap(img);
+    URL.revokeObjectURL(url);
+    return bmp;
+  } catch (err) {
+    URL.revokeObjectURL(url);
+    throw err;
+  }
+}
+
+async function createPreviewBitmap(bitmap) {
+  const total = bitmap.width * bitmap.height;
+  if (total <= 4_000_000) return null; // ≤ 4MP — use original for display
+  // Downscale to ~2MP for smooth rendering
+  const scale = Math.sqrt(4_000_000 / total);
+  const pw = Math.round(bitmap.width  * scale);
+  const ph = Math.round(bitmap.height * scale);
+  try {
+    return await createImageBitmap(bitmap, { resizeWidth: pw, resizeHeight: ph, resizeQuality: 'medium' });
+  } catch (_) {
+    // createImageBitmap with resize not supported — use canvas
+    const off = document.createElement('canvas');
+    off.width = pw; off.height = ph;
+    off.getContext('2d').drawImage(bitmap, 0, 0, pw, ph);
+    return createImageBitmap(off);
+  }
+}
+
+async function loadImageFile(file) {
+  showLoading(true);
+
+  const ext  = file.name.split('.').pop().toLowerCase();
+  const mime = file.type.toLowerCase();
+  isHDRFile  = ['heic', 'heif', 'avif'].includes(ext)
+             || mime.includes('heic') || mime.includes('heif') || mime.includes('avif');
+
+  let bitmap;
+  try {
+    bitmap = await tryCreateBitmap(file);
+  } catch (err) {
+    showLoading(false);
+    const isHeic = ['heic', 'heif'].includes(ext) || mime.includes('heic') || mime.includes('heif');
+    if (isHeic) {
+      showToast('HEIC/HEIF requires Safari to decode');
+    } else {
+      showToast('Could not load image — try a different format');
+    }
+    return;
+  }
+
+  imgBitmap  = bitmap;
+  imgNatW    = bitmap.width;
+  imgNatH    = bitmap.height;
+  origFileName = file.name.replace(/\.[^.]+$/, '');
+
+  // Build preview bitmap for large images
+  prevBitmap = await createPreviewBitmap(bitmap).catch(() => null);
+
+  // Initialize crop to full image
+  crop.x = 0; crop.y = 0; crop.w = imgNatW; crop.h = imgNatH;
+  lockedAspect = null;
+  aspectSelect.value = 'free';
+
+  // Switch to crop screen
+  uploadScreen.classList.add('hidden');
+  cropScreen.classList.remove('hidden');
+  ro.observe(workspace);
+
+  resizeCanvas();
+  fitView();
+
+  showLoading(false);
+  requestRender();
+
+  // Update header
+  fileNameLabel.textContent = file.name;
+  if (isHDRFile) {
+    hdrBadge.classList.add('visible');
+    showToast(isP3Canvas ? 'HDR/wide-gamut preserved (P3)' : 'HDR detected — open in Safari for best results');
+  } else {
+    hdrBadge.classList.remove('visible');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   EXPORT
+═══════════════════════════════════════════════════════════════ */
+async function exportCrop() {
+  const outW = Math.max(1, Math.round(crop.w));
+  const outH = Math.max(1, Math.round(crop.h));
+
+  // Warn if export canvas would be very large
+  if (outW > 16384 || outH > 16384) {
+    showToast('Output is very large — may take a moment');
+  }
+
+  const off = document.createElement('canvas');
+  off.width  = outW;
+  off.height = outH;
+
+  let ectx;
+  // Use same color space as display canvas for HDR fidelity
+  if (isHDRFile && isP3Canvas) {
+    try { ectx = off.getContext('2d', { colorSpace: 'display-p3' }); } catch (_) {}
+  }
+  if (!ectx) ectx = off.getContext('2d');
+
+  // White fill — uses P3 white if available, otherwise plain white
+  ectx.fillStyle = (isHDRFile && isP3Canvas)
+    ? 'color(display-p3 1 1 1)'
+    : '#ffffff';
+  ectx.fillRect(0, 0, outW, outH);
+
+  // Draw full-resolution image offset by crop origin
+  // crop.x/y can be negative (extending left/top of image) → -crop.x/y shifts image into frame
+  ectx.drawImage(imgBitmap, -crop.x, -crop.y, imgNatW, imgNatH);
+
+  // Format: PNG for HDR (embeds ICC P3 profile in Safari), JPEG for sRGB
+  const usePNG  = isHDRFile;
+  const mime    = usePNG ? 'image/png' : 'image/jpeg';
+  const ext     = usePNG ? 'png'       : 'jpg';
+  const quality = usePNG ? undefined   : 0.94;
+
+  saveBtn.textContent = 'Saving…';
+  saveBtn.disabled    = true;
+
+  off.toBlob(blob => {
+    saveBtn.textContent = 'Save Image';
+    saveBtn.disabled    = false;
+
+    if (!blob) { showToast('Export failed — try again'); return; }
+
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href     = url;
+    a.download = `${origFileName}-cropped.${ext}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+
+    if (usePNG) {
+      showToast('Saved as PNG — wide-gamut color preserved');
+    } else {
+      showToast('Saved as JPEG');
+    }
+  }, mime, quality);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   UI HELPERS
+═══════════════════════════════════════════════════════════════ */
+function showLoading(on) {
+  loadingOvl.classList.toggle('hidden', !on);
+}
+
+let toastTimer;
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('show'), 2800);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   EVENT WIRING
+═══════════════════════════════════════════════════════════════ */
+
+// File input
+fileInput.addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) loadImageFile(f);
+  fileInput.value = '';
+});
+
+// Upload zone click/tap
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
+// The "Choose Photo" button inside upload zone — delegate click up to zone
+document.querySelector('.upload-cta').addEventListener('click', e => {
+  e.stopPropagation();
+  fileInput.click();
+});
+
+// Drag-and-drop (desktop)
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) {
+    loadImageFile(f);
+  } else {
+    showToast('Please drop an image file');
+  }
+});
+
+// New image
+newBtn.addEventListener('click', () => {
+  ro.unobserve(workspace);
+  imgBitmap = null;
+  prevBitmap = null;
+  cropScreen.classList.add('hidden');
+  uploadScreen.classList.remove('hidden');
+  hdrBadge.classList.remove('visible');
+  dimOverlay.classList.remove('visible');
+  outsideHint.classList.remove('visible');
+});
+
+// Fit view
+fitBtn.addEventListener('click', () => { fitView(); requestRender(); });
+
+// Reset crop
+resetBtn.addEventListener('click', () => {
+  crop.x = 0; crop.y = 0; crop.w = imgNatW; crop.h = imgNatH;
+  fitView();
+  requestRender();
+});
+
+// Save
+saveBtn.addEventListener('click', () => {
+  exportCrop().catch(() => {
+    showToast('Save failed');
+    saveBtn.textContent = 'Save Image';
+    saveBtn.disabled = false;
+  });
+});
+
+// Aspect ratio
+aspectSelect.addEventListener('change', e => {
+  lockedAspect = ASPECT_MAP[e.target.value] ?? null;
+  if (lockedAspect !== null) {
+    // Adjust crop to new aspect ratio, centered on current crop center
+    const cx = crop.x + crop.w / 2;
+    const cy = crop.y + crop.h / 2;
+    const current = crop.w / crop.h;
+    let nw = crop.w, nh = crop.h;
+    if (current > lockedAspect) {
+      nh = nw / lockedAspect;
+    } else {
+      nw = nh * lockedAspect;
+    }
+    crop.x = cx - nw / 2;
+    crop.y = cy - nh / 2;
+    crop.w = nw;
+    crop.h = nh;
+    fitView();
+    requestRender();
+  }
+});
+</script>
+</body>
+</html>
