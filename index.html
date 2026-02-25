@@ -564,15 +564,17 @@ function fitView() {
   const cw = cssW(), ch = cssH();
   if (!cw || !ch || !imgNatW) return;
 
-  // Compute bounding box: image union crop
-  const bx0 = Math.min(0, crop.x);
-  const by0 = Math.min(0, crop.y);
-  const bx1 = Math.max(imgNatW, crop.x + crop.w);
-  const by1 = Math.max(imgNatH, crop.y + crop.h);
+  // Bounding box: image + 30% white-canvas buffer each side, expanded further if crop extends outside
+  const ex = imgNatW * 0.30;
+  const ey = imgNatH * 0.30;
+  const bx0 = Math.min(-ex, crop.x);
+  const by0 = Math.min(-ey, crop.y);
+  const bx1 = Math.max(imgNatW + ex, crop.x + crop.w);
+  const by1 = Math.max(imgNatH + ey, crop.y + crop.h);
   const bw = bx1 - bx0;
   const bh = by1 - by0;
 
-  const pad = Math.min(cw, ch) * 0.07 + 24;
+  const pad = 20;
   const s = Math.min((cw - pad * 2) / bw, (ch - pad * 2) / bh);
   view.zoom = s;
   view.panX = (cw - bw * s) / 2 - bx0 * s;
@@ -655,14 +657,22 @@ function render() {
   const cpW = crop.w * view.zoom;
   const cpH = crop.h * view.zoom;
 
-  // ── 2. White fill for crop area (visible where crop extends outside image)
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(cp.x, cp.y, cpW, cpH);
-
-  // ── 3. Draw image
+  // Image in canvas CSS coords
   const ip  = toCSS(0, 0);
   const ipW = imgNatW * view.zoom;
   const ipH = imgNatH * view.zoom;
+
+  // ── 2. White canvas area — the "paper" that surrounds the image.
+  //    Large enough (±200% of image) to stay white for any practical outside-crop.
+  //    This is also what fills on export for regions outside the image.
+  const EXTRA = 2.0;
+  const canvP = toCSS(-imgNatW * EXTRA, -imgNatH * EXTRA);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(canvP.x, canvP.y,
+    imgNatW * (1 + 2 * EXTRA) * view.zoom,
+    imgNatH * (1 + 2 * EXTRA) * view.zoom);
+
+  // ── 3. Draw image (centred on white canvas)
   ctx.drawImage(prevBitmap || imgBitmap, ip.x, ip.y, ipW, ipH);
 
   // ── 4. Dark overlay outside crop (4 rectangles)
@@ -688,11 +698,20 @@ function render() {
   ctx.setLineDash([]);
   ctx.strokeRect(cp.x + 0.75, cp.y + 0.75, cpW - 1.5, cpH - 1.5);
 
-  // ── 7. Image boundary dashed line (if crop extends outside image)
+  // ── 7. Image boundary indicator — always visible so user knows where the image ends
+  //    on the white canvas (and where white fill will begin on export).
   const cropOutside = crop.x < -0.5 || crop.y < -0.5
     || (crop.x + crop.w) > imgNatW + 0.5 || (crop.y + crop.h) > imgNatH + 0.5;
+
+  // Subtle solid border (always)
+  ctx.strokeStyle = 'rgba(160, 160, 160, 0.55)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([]);
+  ctx.strokeRect(ip.x, ip.y, ipW, ipH);
+
+  // Orange dashed highlight when crop actively extends outside the image
   if (cropOutside) {
-    ctx.strokeStyle = 'rgba(255, 159, 10, 0.75)';
+    ctx.strokeStyle = 'rgba(255, 159, 10, 0.85)';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([6, 5]);
     ctx.strokeRect(ip.x + 0.75, ip.y + 0.75, ipW - 1.5, ipH - 1.5);
