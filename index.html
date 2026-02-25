@@ -292,6 +292,25 @@
       cursor: not-allowed;
     }
 
+    /* Apply Crop button */
+    .apply-btn {
+      background: #30d158;
+      color: #000;
+      border: none;
+      padding: 11px 18px;
+      border-radius: 12px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.15s;
+    }
+    .apply-btn:active { opacity: 0.7; }
+    .apply-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Undo button — only shown when history exists */
+    #undoBtn { display: none; }
+
     /* ─── Toast ──────────────────────────────────────────────── */
     #toast {
       position: fixed;
@@ -388,6 +407,7 @@
   </div>
 
   <div class="crop-toolbar">
+    <button class="tb-btn" id="undoBtn" type="button" aria-label="Undo last applied crop">Undo</button>
     <button class="tb-btn" id="resetBtn" type="button">Reset</button>
     <select class="aspect-select" id="aspectSelect" aria-label="Aspect ratio">
       <option value="free">Free</option>
@@ -400,7 +420,8 @@
       <option value="3:4">3∶4</option>
     </select>
     <div class="spacer"></div>
-    <button class="save-btn" id="saveBtn" type="button">Save Image</button>
+    <button class="apply-btn" id="applyBtn" type="button">Apply Crop</button>
+    <button class="save-btn" id="saveBtn" type="button">Save</button>
   </div>
 
 </div>
@@ -462,6 +483,11 @@ const crop = { x: 0, y: 0, w: 0, h: 0 };
 // Locked aspect ratio (null = free)
 let lockedAspect = null;
 
+// Multi-level crop history — each entry is { bitmap, natW, natH, prevBitmap }
+const cropHistory = [];
+// Full display filename (with extension) for the label
+let currentFileName = '';
+
 // Drag state
 let drag = null;
 // {
@@ -498,6 +524,8 @@ const fitBtn        = document.getElementById('fitBtn');
 const resetBtn      = document.getElementById('resetBtn');
 const newBtn        = document.getElementById('newBtn');
 const saveBtn       = document.getElementById('saveBtn');
+const applyBtn      = document.getElementById('applyBtn');
+const undoBtn       = document.getElementById('undoBtn');
 const aspectSelect  = document.getElementById('aspectSelect');
 const toast         = document.getElementById('toast');
 const loadingOvl    = document.getElementById('loadingOverlay');
@@ -843,6 +871,24 @@ function applyDrag(canvasCssX, canvasCssY) {
 
   crop.x = nx; crop.y = ny;
   crop.w = nw; crop.h = nh;
+
+  // ── Symmetric outside-crop ────────────────────────────────────────────────
+  // When any resize handle crosses outside the image boundary, enforce equal
+  // extension on all 4 sides — the image stays centred, like adding a frame.
+  // (Skipped when aspect ratio is locked, or when just moving/panning.)
+  if (!lockedAspect) {
+    const extL = Math.max(0, -crop.x);
+    const extR = Math.max(0, crop.x + crop.w - imgNatW);
+    const extT = Math.max(0, -crop.y);
+    const extB = Math.max(0, crop.y + crop.h - imgNatH);
+    const ext  = Math.max(extL, extR, extT, extB);
+    if (ext > 0) {
+      crop.x = -ext;
+      crop.y = -ext;
+      crop.w = imgNatW + 2 * ext;
+      crop.h = imgNatH + 2 * ext;
+    }
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1009,10 +1055,14 @@ async function loadImageFile(file) {
     return;
   }
 
-  imgBitmap  = bitmap;
-  imgNatW    = bitmap.width;
-  imgNatH    = bitmap.height;
+  imgBitmap    = bitmap;
+  imgNatW      = bitmap.width;
+  imgNatH      = bitmap.height;
   origFileName = file.name.replace(/\.[^.]+$/, '');
+  currentFileName = file.name;
+
+  // Clear crop history for the new image
+  cropHistory.length = 0;
 
   // Build preview bitmap for large images
   prevBitmap = await createPreviewBitmap(bitmap).catch(() => null);
@@ -1034,7 +1084,7 @@ async function loadImageFile(file) {
   requestRender();
 
   // Update header
-  fileNameLabel.textContent = file.name;
+  updateHistoryUI(); // resets label to currentFileName with no step suffix
   if (isHDRFile) {
     hdrBadge.classList.add('visible');
     showToast(isP3Canvas ? 'HDR/wide-gamut preserved (P3)' : 'HDR detected — open in Safari for best results');
@@ -1086,7 +1136,7 @@ async function exportCrop() {
   saveBtn.disabled    = true;
 
   off.toBlob(blob => {
-    saveBtn.textContent = 'Save Image';
+    saveBtn.textContent = 'Save';
     saveBtn.disabled    = false;
 
     if (!blob) { showToast('Export failed — try again'); return; }
@@ -1106,6 +1156,79 @@ async function exportCrop() {
       showToast('Saved as JPEG');
     }
   }, mime, quality);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MULTI-LEVEL CROP
+═══════════════════════════════════════════════════════════════ */
+
+// Commit the current crop selection: renders it into a new bitmap and
+// pushes the old state onto the history stack for undo.
+async function applyCrop() {
+  const outW = Math.max(1, Math.round(crop.w));
+  const outH = Math.max(1, Math.round(crop.h));
+
+  const off = document.createElement('canvas');
+  off.width  = outW;
+  off.height = outH;
+
+  let ectx;
+  if (isHDRFile && isP3Canvas) {
+    try { ectx = off.getContext('2d', { colorSpace: 'display-p3' }); } catch (_) {}
+  }
+  if (!ectx) ectx = off.getContext('2d');
+
+  ectx.fillStyle = '#ffffff';
+  ectx.fillRect(0, 0, outW, outH);
+  ectx.drawImage(imgBitmap, -crop.x, -crop.y, imgNatW, imgNatH);
+
+  // Save current state before overwriting
+  cropHistory.push({ bitmap: imgBitmap, natW: imgNatW, natH: imgNatH, prevBitmap });
+
+  // Switch to new cropped image
+  const newBitmap = await createImageBitmap(off);
+  imgBitmap  = newBitmap;
+  imgNatW    = outW;
+  imgNatH    = outH;
+  prevBitmap = await createPreviewBitmap(newBitmap).catch(() => null);
+
+  // Reset crop to full new image, free aspect lock
+  crop.x = 0; crop.y = 0; crop.w = outW; crop.h = outH;
+  lockedAspect = null;
+  aspectSelect.value = 'free';
+
+  fitView();
+  render();
+  updateHistoryUI();
+  showToast('Crop applied — select another area to crop again');
+}
+
+function undoCrop() {
+  if (!cropHistory.length) return;
+  const prev = cropHistory.pop();
+
+  imgBitmap  = prev.bitmap;
+  imgNatW    = prev.natW;
+  imgNatH    = prev.natH;
+  prevBitmap = prev.prevBitmap;
+
+  crop.x = 0; crop.y = 0; crop.w = imgNatW; crop.h = imgNatH;
+  lockedAspect = null;
+  aspectSelect.value = 'free';
+
+  fitView();
+  render();
+  updateHistoryUI();
+  showToast('Undone');
+}
+
+function updateHistoryUI() {
+  const n = cropHistory.length;
+  undoBtn.style.display = n > 0 ? '' : 'none';
+  // Show crop depth in the filename label
+  fileNameLabel.textContent = n > 0
+    ? `${currentFileName} (step ${n + 1})`
+    : currentFileName;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1167,11 +1290,13 @@ newBtn.addEventListener('click', () => {
   ro.unobserve(workspace);
   imgBitmap = null;
   prevBitmap = null;
+  cropHistory.length = 0;
   cropScreen.classList.add('hidden');
   uploadScreen.classList.remove('hidden');
   hdrBadge.classList.remove('visible');
   dimOverlay.classList.remove('visible');
   outsideHint.classList.remove('visible');
+  updateHistoryUI();
 });
 
 // Fit view
@@ -1183,6 +1308,14 @@ resetBtn.addEventListener('click', () => {
   fitView();
   requestRender();
 });
+
+// Apply crop (commit to memory for next crop)
+applyBtn.addEventListener('click', () => {
+  applyCrop().catch(() => showToast('Apply failed'));
+});
+
+// Undo last applied crop
+undoBtn.addEventListener('click', undoCrop);
 
 // Save
 saveBtn.addEventListener('click', () => {
