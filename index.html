@@ -387,6 +387,22 @@
       color: #4db3ff;
     }
 
+    .expand-chip.active {
+      background: rgba(48, 209, 88, 0.18);
+      border-color: #30d158;
+      color: #30d158;
+    }
+
+    .strip-label {
+      flex-shrink: 0;
+      font-size: 11px;
+      font-weight: 600;
+      color: rgba(242, 242, 247, 0.4);
+      white-space: nowrap;
+      align-self: center;
+      padding-right: 2px;
+    }
+
     /* Mini aspect-ratio icon inside each chip */
     .preset-icon {
       display: inline-block;
@@ -494,6 +510,9 @@
   <!-- Aspect ratio presets strip -->
   <div class="presets-strip" id="presetsStrip" role="group" aria-label="Aspect ratio presets"></div>
 
+  <!-- Outside-crop expand strip -->
+  <div class="presets-strip" id="expandStrip" role="group" aria-label="Outside crop expand presets"></div>
+
   <div class="crop-toolbar">
     <button class="tb-btn" id="undoBtn" type="button" aria-label="Undo last applied crop">Undo</button>
     <button class="tb-btn" id="resetBtn" type="button">Reset</button>
@@ -566,6 +585,9 @@ const PRESETS = [
   { label: '4∶5',   value: '4:5',   ratio: 4/5    },
 ];
 let activePreset = 'free';
+let activeExpandPct = null;
+
+const EXPAND_PRESETS = [5, 10, 15, 20, 25, 35, 50, 70, 100];
 
 // Multi-level crop history — each entry is { bitmap, natW, natH, prevBitmap }
 const cropHistory = [];
@@ -611,6 +633,7 @@ const saveBtn       = document.getElementById('saveBtn');
 const applyBtn      = document.getElementById('applyBtn');
 const undoBtn       = document.getElementById('undoBtn');
 const presetsStrip  = document.getElementById('presetsStrip');
+const expandStrip   = document.getElementById('expandStrip');
 const toast         = document.getElementById('toast');
 const loadingOvl    = document.getElementById('loadingOverlay');
 
@@ -880,6 +903,11 @@ function render() {
    DRAG LOGIC
 ═══════════════════════════════════════════════════════════════ */
 function startDrag(handle, canvasCssX, canvasCssY) {
+  // Deselect expand preset when the user manually resizes
+  if (handle !== 'move' && handle !== 'pan' && activeExpandPct !== null) {
+    activeExpandPct = null;
+    updateExpandUI();
+  }
   const imgPt = toImg(canvasCssX, canvasCssY);
   drag = {
     handle,
@@ -972,15 +1000,26 @@ function applyDrag(canvasCssX, canvasCssY) {
   crop.w = nw; crop.h = nh;
 
   // ── Symmetric outside-crop ────────────────────────────────────────────────
-  // When any resize handle crosses outside the image boundary, enforce equal
-  // extension on all 4 sides — the image stays centred, like adding a frame.
-  // (Skipped when aspect ratio is locked, or when just moving/panning.)
+  // Enforce equal extension on all 4 sides so the image stays centred.
+  // ext is derived only from the sides the dragged handle controls — this
+  // prevents the opposite side from acting as a floor and locking the crop.
   if (!lockedAspect) {
     const extL = Math.max(0, -crop.x);
     const extR = Math.max(0, crop.x + crop.w - imgNatW);
     const extT = Math.max(0, -crop.y);
     const extB = Math.max(0, crop.y + crop.h - imgNatH);
-    const ext  = Math.max(extL, extR, extT, extB);
+    let ext;
+    switch (drag.handle) {
+      case 'n':  ext = extT; break;
+      case 's':  ext = extB; break;
+      case 'e':  ext = extR; break;
+      case 'w':  ext = extL; break;
+      case 'nw': ext = Math.max(extL, extT); break;
+      case 'ne': ext = Math.max(extR, extT); break;
+      case 'se': ext = Math.max(extR, extB); break;
+      case 'sw': ext = Math.max(extL, extB); break;
+      default:   ext = Math.max(extL, extR, extT, extB); break;
+    }
     if (ext > 0) {
       crop.x = -ext;
       crop.y = -ext;
@@ -1169,7 +1208,9 @@ async function loadImageFile(file) {
   // Initialize crop to full image
   crop.x = 0; crop.y = 0; crop.w = imgNatW; crop.h = imgNatH;
   lockedAspect = null;
+  activeExpandPct = null;
   setActivePreset('free');
+  updateExpandUI();
 
   // Switch to crop screen
   uploadScreen.classList.add('hidden');
@@ -1294,7 +1335,9 @@ async function applyCrop() {
   // Reset crop to full new image, free aspect lock
   crop.x = 0; crop.y = 0; crop.w = outW; crop.h = outH;
   lockedAspect = null;
+  activeExpandPct = null;
   setActivePreset('free');
+  updateExpandUI();
 
   fitView();
   render();
@@ -1313,7 +1356,9 @@ function undoCrop() {
 
   crop.x = 0; crop.y = 0; crop.w = imgNatW; crop.h = imgNatH;
   lockedAspect = null;
+  activeExpandPct = null;
   setActivePreset('free');
+  updateExpandUI();
 
   fitView();
   render();
@@ -1404,6 +1449,8 @@ fitBtn.addEventListener('click', () => { fitView(); requestRender(); });
 // Reset crop
 resetBtn.addEventListener('click', () => {
   crop.x = 0; crop.y = 0; crop.w = imgNatW; crop.h = imgNatH;
+  activeExpandPct = null;
+  updateExpandUI();
   fitView();
   requestRender();
 });
@@ -1489,6 +1536,45 @@ function buildPresetChips() {
 
 // Build chips immediately so the strip is populated when the crop screen shows
 buildPresetChips();
+
+// ── Outside-crop expand presets ─────────────────────────────────────────────
+
+function updateExpandUI() {
+  expandStrip.querySelectorAll('.expand-chip').forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.pct) === activeExpandPct);
+  });
+}
+
+function applyExpandPreset(pct) {
+  if (!imgBitmap) return;
+  activeExpandPct = pct;
+  const extX = imgNatW * pct / 100;
+  const extY = imgNatH * pct / 100;
+  crop.x = -extX;
+  crop.y = -extY;
+  crop.w = imgNatW + 2 * extX;
+  crop.h = imgNatH + 2 * extY;
+  lockedAspect = null;
+  setActivePreset('free');
+  updateExpandUI();
+  fitView();
+  requestRender();
+}
+
+function buildExpandChips() {
+  expandStrip.innerHTML = '<span class="strip-label">Expand:</span>';
+  EXPAND_PRESETS.forEach(pct => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'preset-chip expand-chip';
+    btn.dataset.pct = pct;
+    btn.textContent = `${pct}%`;
+    btn.addEventListener('click', () => applyExpandPreset(pct));
+    expandStrip.appendChild(btn);
+  });
+}
+
+buildExpandChips();
 </script>
 </body>
 </html>
